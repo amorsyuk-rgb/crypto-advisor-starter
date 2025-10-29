@@ -47,7 +47,7 @@ function detectFVG(candles){
 }
 async function fetchCandles(symbol='BTCUSDT', interval='1h', limit=200){
   // Binance public Klines
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+  const url = `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
   const resp = await axios.get(url, { timeout: 10000 });
   // each kline: [ openTime, open, high, low, close, volume, closeTime, ... ]
   return resp.data.map(k => ({
