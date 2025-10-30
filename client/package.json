@@ -18,9 +18,9 @@
   "engines": {
     "node": "20.x"
   },
-  "scripts": {
-  "dev": "vite --root .",
-  "build": "vite build --root .",
-  "preview": "vite preview --root ."
+ "scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "preview": "vite preview"
 }
 }
