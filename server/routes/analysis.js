@@ -1,5 +1,11 @@
-router.get("/:symbol/analysis", async (req, res) => {
-  const { symbol } = req.params;
-  res.json({ symbol, price: 68000, indicators: { ema50: 67500, ema200: 66000 } });
+import express from "express";
+
+const router = express.Router(); // ✅ define router before using it
+
+// Example route
+router.get("/", (req, res) => {
+  res.send("Analysis route working!");
 });
+
+// Export router correctly
 export default router;
