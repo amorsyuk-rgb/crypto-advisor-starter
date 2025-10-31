@@ -1,44 +1,40 @@
 import express from "express";
 const router = express.Router();
 
-// Candidate Binance public mirrors
-const BINANCE_MIRRORS = [
-  "https://api1.binance.com",
-  "https://api2.binance.com",
-  "https://api3.binance.com",
-  "https://data-api.binance.vision"
-];
+// ✅ Your confirmed working mirror
+const BINANCE_BASE = "https://data-api.binance.vision";
 
-async function testBinanceMirrors(symbol = "BTCUSDT") {
-  for (const base of BINANCE_MIRRORS) {
-    try {
-      const res = await fetch(`${base}/api/v3/ticker/price?symbol=${symbol}`);
-      const data = await res.json();
-
-      if (res.ok && data?.price && !data?.msg?.includes("restricted location")) {
-        console.log(`✅ WORKING MIRROR: ${base}`);
-        return { base, data };
-      } else {
-        console.warn(`⚠️ Blocked or invalid from ${base}:`, data?.msg);
-      }
-    } catch (e) {
-      console.warn(`❌ Failed ${base}: ${e.message}`);
-    }
-  }
-  throw new Error("All Binance mirrors blocked or unavailable.");
-}
-
-// Test route to find working mirror
-router.get("/test-binance", async (req, res) => {
+// Get current price
+router.get("/price", async (req, res) => {
+  const { symbol = "BTCUSDT" } = req.query;
   try {
-    const { base, data } = await testBinanceMirrors();
-    res.json({
-      success: true,
-      workingMirror: base,
-      data
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    const response = await fetch(`${BINANCE_BASE}/api/v3/ticker/price?symbol=${symbol}`);
+    const data = await response.json();
+    res.json({ success: true, source: "binance", data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get candlestick data
+router.get("/klines", async (req, res) => {
+  const { symbol = "BTCUSDT", interval = "1h", limit = 10 } = req.query;
+  try {
+    const response = await fetch(
+      `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+    );
+    const data = await response.json();
+    const formatted = data.map(k => ({
+      openTime: new Date(k[0]).toISOString(),
+      open: k[1],
+      high: k[2],
+      low: k[3],
+      close: k[4],
+      volume: k[5],
+    }));
+    res.json({ success: true, source: "binance", data: formatted });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
