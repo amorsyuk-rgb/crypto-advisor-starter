@@ -1,17 +1,33 @@
 {
-  "name": "crypto-advisor-server",
+  "name": "crypto-advisor-starter",
   "version": "1.0.0",
+  "description": "AI-powered crypto analysis backend using Binance data and OpenRouter models.",
   "type": "module",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^4.18.2",
-    "node-fetch": "^2.6.7"
-     "cors": "^2.8.5"
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   },
   "engines": {
-    "node": "20.x"
-  }
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "crypto",
+    "binance",
+    "ai",
+    "express",
+    "openrouter",
+    "trading",
+    "analysis"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
-"type": "module"
