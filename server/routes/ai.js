@@ -20,8 +20,10 @@ function setCache(symbol, insight) {
 // --- Model priority list (all free) ---
 const FREE_MODELS = [
   "deepseek/deepseek-chat-v3.1:free",
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "mistralai/mistral-7b-instruct"
+  "meta-llama/llama-3.3-8b-instruct:free",
+  "deepseek/deepseek-r1-distill-llama-70b:free",
+  "google/gemini-2.0-flash-exp:free",
+  "qwen/qwen-2.5-72b-instruct:free"
 ];
 
 // --- Route definition ---
