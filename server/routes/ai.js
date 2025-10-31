@@ -12,22 +12,21 @@ const MAX_CACHE_ITEMS = 20;
 // Cache helper
 function setCache(symbol, insight) {
   if (aiCache.size >= MAX_CACHE_ITEMS) {
-    const oldestKey = aiCache.keys().next().value;
-    aiCache.delete(oldestKey);
+    aiCache.delete(aiCache.keys().next().value);
   }
   aiCache.set(symbol, { insight, timestamp: Date.now() });
 }
 
-// --- AI Route ---
+// --- Main Route ---
 router.get("/:symbol/ai", async (req, res) => {
   const { symbol } = req.params;
   const force = req.query.force === "true";
   const now = Date.now();
 
-  // ✅ Default to DeepSeek V3.1 free model
-  const model = req.query.model || "deepseek/deepseek-chat-v3.1:free";
+  // Default to DeepSeek free model
+  let model = req.query.model || "deepseek/deepseek-chat-v3.1:free";
 
-  // Check cache
+  // Serve from cache
   const cached = aiCache.get(symbol);
   if (cached && !force && now - cached.timestamp < CACHE_TTL) {
     return res.json({
@@ -39,13 +38,12 @@ router.get("/:symbol/ai", async (req, res) => {
   }
 
   try {
-    // --- Fetch market analysis first ---
+    // --- Fetch base analysis ---
     const baseUrl = `https://${req.get("host")}`;
     const analysisUrl = `${baseUrl}/api/assets/${symbol}/analysis`;
     const analysisRes = await fetch(analysisUrl);
     const analysis = await analysisRes.json();
 
-    // Compact data for the AI prompt
     const compact = {
       price: analysis.price,
       ema50: analysis.indicators?.ema50,
@@ -60,42 +58,47 @@ router.get("/:symbol/ai", async (req, res) => {
 You are a professional crypto analyst. Given this data:
 ${JSON.stringify(compact, null, 2)}
 Summarize ${symbol}'s current market condition in 3–5 sentences.
-Include short-term trend, momentum, and risk level.
-Respond in clear, concise language suitable for traders.
+Include short-term trend, momentum, and risk level in plain English.
 `;
 
-    // --- Query OpenRouter (DeepSeek model) ---
-    const aiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "HTTP-Referer": "https://crypto-advisor-starter.onrender.com",
-        "X-Title": "Crypto Advisor Starter"
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: "You are a professional crypto market analyst." },
-          { role: "user", content: prompt }
-        ]
-      })
-    });
+    // --- Function to query OpenRouter ---
+    async function queryModel(modelId, reasoning = false) {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "HTTP-Referer": "https://crypto-advisor-starter.onrender.com",
+          "X-Title": "Crypto Advisor Starter"
+        },
+        body: JSON.stringify({
+          model: modelId,
+          reasoning: reasoning,
+          messages: [
+            { role: "system", content: "You are a professional crypto market analyst." },
+            { role: "user", content: prompt }
+          ]
+        })
+      });
+      return res.json();
+    }
 
-    const aiData = await aiRes.json();
-    console.log("AI raw response:", JSON.stringify(aiData, null, 2));
+    // --- Step 1: Try DeepSeek with reasoning ---
+    let aiData = await queryModel(model, true);
+    let insight = aiData.choices?.[0]?.message?.content;
 
-    const insight = aiData.choices?.[0]?.message?.content || "No AI insight generated.";
+    // --- Step 2: Fallback to GPT-4o-mini if DeepSeek fails ---
+    if (!insight) {
+      console.warn("⚠️ DeepSeek returned empty response, switching to GPT-4o-mini...");
+      model = "openrouter/openai/gpt-4o-mini";
+      aiData = await queryModel(model, false);
+      insight = aiData.choices?.[0]?.message?.content || "No AI insight generated from any model.";
+    }
 
-    // Save to cache
+    // Cache and respond
     setCache(symbol, insight);
+    res.json({ symbol, model, ai_summary: insight, cached: false });
 
-    res.json({
-      symbol,
-      model,
-      ai_summary: insight,
-      cached: false,
-    });
   } catch (err) {
     console.error("AI route error:", err);
     res.status(500).json({ error: "Failed to generate AI analysis." });
