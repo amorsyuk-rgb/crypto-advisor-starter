@@ -1,11 +1,16 @@
 import express from "express";
+const router = express.Router();
 
-const router = express.Router(); // ✅ define router before using it
-
-// Example route
-router.get("/", (req, res) => {
-  res.send("Analysis route working!");
+// ✅ Route 1: Current Binance price
+router.get("/binance-price", async (req, res) => {
+  try {
+    const { symbol = "BTCUSDT" } = req.query;
+    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    const data = await response.json();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-// Export router correctly
 export default router;
