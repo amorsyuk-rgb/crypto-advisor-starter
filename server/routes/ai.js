@@ -56,19 +56,19 @@ Include short-term trend, momentum, and risk level.`;
 
     // Query OpenRouter (GPT-4o-mini)
     const aiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": \`Bearer \${process.env.OPENROUTER_API_KEY}\`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are a professional crypto market analyst." },
-          { role: "user", content: prompt },
-        ],
-      }),
-    });
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + process.env.OPENROUTER_API_KEY
+  },
+  body: JSON.stringify({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You are a professional crypto market analyst." },
+      { role: "user", content: prompt }
+    ]
+  })
+});
 
     const aiData = await aiRes.json();
     const insight = aiData.choices?.[0]?.message?.content || "No AI insight generated.";
