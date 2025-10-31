@@ -1,14 +1,8 @@
 import express from "express";
-import analysisRouter from "./routes/analysis.js";
-import aiRouter from "./routes/ai.js";
+import analysisRoutes from "./routes/analysis.js";
 
 const app = express();
-app.use(express.json());
 
-app.use("/api/assets", analysisRouter);
-app.use("/api/assets", aiRouter);
+app.use("/api/analysis", analysisRoutes); // ✅ mount router
 
-app.get("/api/health", (req, res) => res.json({ status: "ok" }));
-
-const port = process.env.PORT || 10000;
-app.listen(port, () => console.log("Server listening on", port));
+app.listen(3000, () => console.log("Server running on port 3000"));
