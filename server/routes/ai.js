@@ -19,9 +19,9 @@ function setCache(symbol, insight) {
 
 // --- Model priority list (all free) ---
 const FREE_MODELS = [
-  "deepseek/deepseek-chat-v3.1:free",   // main DeepSeek model
-  "nousresearch/hermes-2-pro",          // reliable fallback
-  "gryphe/mythomax-l2-13b"              // creative reasoning fallback
+  "deepseek/deepseek-chat-v3.1:free",
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "mistralai/mistral-7b-instruct"
 ];
 
 // --- Route definition ---
