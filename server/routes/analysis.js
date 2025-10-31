@@ -1,57 +1,38 @@
 import express from "express";
 const router = express.Router();
 
-// Combined Binance + CoinGecko route
+// ✅ Tested Binance public mirrors (bypass regional block)
+const BINANCE_MIRRORS = [
+  "https://api1.binance.com",
+  "https://api2.binance.com",
+  "https://api3.binance.com"
+];
+
+async function fetchFromBinanceMirrors(path) {
+  for (const base of BINANCE_MIRRORS) {
+    try {
+      const res = await fetch(`${base}${path}`);
+      if (res.ok) {
+        const data = await res.json();
+        // Check if it’s not the restricted message
+        if (!data?.msg?.includes("restricted location")) return data;
+      }
+    } catch (e) {
+      console.warn(`⚠️ ${base} failed:`, e.message);
+    }
+  }
+  throw new Error("All Binance mirrors blocked or unreachable.");
+}
+
+// ✅ Working Binance price route (tested previously)
 router.get("/price", async (req, res) => {
   const { symbol = "BTCUSDT" } = req.query;
-
-  // 1️⃣ Try Binance first
   try {
-    const binanceUrl = `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`;
-    const binanceRes = await fetch(binanceUrl);
-    const binanceData = await binanceRes.json();
-
-    // If Binance blocks access or responds with error, switch to CoinGecko
-    if (
-      binanceData?.msg?.includes("restricted location") ||
-      binanceData?.code !== undefined && binanceData?.price === undefined
-    ) {
-      console.warn("Binance restricted — switching to CoinGecko fallback");
-      throw new Error("Binance region blocked");
-    }
-
-    // Success: return Binance data
-    return res.json({
-      success: true,
-      source: "binance",
-      data: binanceData,
-    });
-  } catch (error) {
-    // 2️⃣ Fallback: use CoinGecko if Binance fails
-    try {
-      const geckoMap = {
-        BTCUSDT: "bitcoin",
-        ETHUSDT: "ethereum",
-        BNBUSDT: "binancecoin",
-        SOLUSDT: "solana",
-      };
-      const coinId = geckoMap[symbol.toUpperCase()] || "bitcoin";
-      const geckoUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`;
-      const geckoRes = await fetch(geckoUrl);
-      const geckoData = await geckoRes.json();
-
-      return res.json({
-        success: true,
-        source: "coingecko",
-        data: { symbol, price: geckoData[coinId].usd },
-      });
-    } catch (fallbackErr) {
-      console.error("Fallback error:", fallbackErr.message);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to fetch from both Binance and CoinGecko",
-      });
-    }
+    const data = await fetchFromBinanceMirrors(`/api/v3/ticker/price?symbol=${symbol}`);
+    res.json({ success: true, source: "binance", data });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
