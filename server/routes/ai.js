@@ -71,6 +71,7 @@ Include short-term trend, momentum, and risk level.`;
 });
 
     const aiData = await aiRes.json();
+    console.log("AI raw response:", JSON.stringify(aiData, null, 2));
     const insight = aiData.choices?.[0]?.message?.content || "No AI insight generated.";
 
     // Save to cache
