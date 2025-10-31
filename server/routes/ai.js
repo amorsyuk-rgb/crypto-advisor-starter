@@ -4,35 +4,36 @@ import fetch from "node-fetch";
 
 const router = express.Router();
 
-// --- AI Cache ---
+// --- In-memory AI Cache ---
 const aiCache = new Map();
 const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 const MAX_CACHE_ITEMS = 20;
 
-// Cache helper
-function setCache(symbol, insight) {
-  if (aiCache.size >= MAX_CACHE_ITEMS) {
-    aiCache.delete(aiCache.keys().next().value);
-  }
-  aiCache.set(symbol, { insight, timestamp: Date.now() });
-}
-
-// --- Model priority list (all free) ---
+// --- Verified API-accessible free models ---
 const FREE_MODELS = [
-  "deepseek/deepseek-chat-v3.1:free",
-  "meta-llama/llama-3.3-8b-instruct:free",
-  "deepseek/deepseek-r1-distill-llama-70b:free",
-  "google/gemini-2.0-flash-exp:free",
-  "qwen/qwen-2.5-72b-instruct:free"
+  "deepseek/deepseek-chat-v3.1:free",             // 🧠 Excellent reasoning & analysis
+  "meta-llama/llama-3.3-8b-instruct:free",        // ⚙️ Stable, general-purpose
+  "deepseek/deepseek-r1-distill-llama-70b:free",  // 🔍 Reasoning-heavy fallback
+  "google/gemini-2.0-flash-exp:free",             // ⚡ Fast & reliable summarizer
+  "qwen/qwen-2.5-72b-instruct:free"               // 💬 Strong contextual reasoning
 ];
 
-// --- Route definition ---
+// --- Cache helper ---
+function setCache(symbol, insight, model) {
+  if (aiCache.size >= MAX_CACHE_ITEMS) {
+    aiCache.delete(aiCache.keys().next().value); // Remove oldest
+  }
+  aiCache.set(symbol, { insight, model, timestamp: Date.now() });
+}
+
+// --- Route ---
 router.get("/:symbol/ai", async (req, res) => {
   const { symbol } = req.params;
   const force = req.query.force === "true";
+  const userModel = req.query.model;
   const now = Date.now();
 
-  // Serve from cache if valid
+  // Check cache
   const cached = aiCache.get(symbol);
   if (cached && !force && now - cached.timestamp < CACHE_TTL) {
     return res.json({
@@ -44,7 +45,7 @@ router.get("/:symbol/ai", async (req, res) => {
   }
 
   try {
-    // --- Step 1: fetch base market data ---
+    // Fetch base market data
     const baseUrl = `https://${req.get("host")}`;
     const analysisUrl = `${baseUrl}/api/assets/${symbol}/analysis`;
     const analysisRes = await fetch(analysisUrl);
@@ -57,27 +58,20 @@ router.get("/:symbol/ai", async (req, res) => {
       atr14: analysis.indicators?.atr14,
       vwap: analysis.indicators?.vwap,
       buy_zone: analysis.buy_zone?.standard,
-      sell_zone: analysis.sell_zone?.standard,
+      sell_zone: analysis.sell_zone?.standard
     };
 
     const prompt = `
-You are a professional crypto analyst. Given this data:
+You are a professional crypto analyst.
+Given this data:
 ${JSON.stringify(compact, null, 2)}
 Summarize ${symbol}'s current market condition in 3–5 sentences.
-Include short-term trend, momentum, and risk level in clear trader language.
+Include short-term trend, momentum, and risk level.
+Write in clear, professional trading language.
 `;
 
-    // --- Helper to call OpenRouter ---
-    async function queryModel(modelId, reasoning = false) {
-      const body = {
-        model: modelId,
-        messages: [
-          { role: "system", content: "You are a professional crypto market analyst." },
-          { role: "user", content: prompt }
-        ]
-      };
-      if (reasoning) body.reasoning = { effort: "medium" };
-
+    // --- Helper: query model ---
+    async function queryModel(modelId) {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -86,39 +80,54 @@ Include short-term trend, momentum, and risk level in clear trader language.
           "HTTP-Referer": "https://crypto-advisor-starter.onrender.com",
           "X-Title": "Crypto Advisor Starter"
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          model: modelId,
+          messages: [
+            { role: "system", content: "You are a senior crypto market analyst providing concise and factual insights." },
+            { role: "user", content: prompt }
+          ]
+        })
       });
       return response.json();
     }
 
-    // --- Step 2: Try models in order until one succeeds ---
+    // --- Step 1: Select model list ---
+    const modelsToTry = userModel ? [userModel] : FREE_MODELS;
     let insight = null;
     let modelUsed = null;
 
-    for (const model of FREE_MODELS) {
+    // --- Step 2: Try models sequentially until one works ---
+    for (const model of modelsToTry) {
       console.log(`🔍 Trying model: ${model}`);
-      const useReasoning = model.startsWith("deepseek/");
-      const aiData = await queryModel(model, useReasoning);
-      console.log("AI raw response:", JSON.stringify(aiData, null, 2));
+      try {
+        const aiData = await queryModel(model);
+        console.log(`AI raw response from ${model}:`, JSON.stringify(aiData, null, 2));
 
-      if (aiData.choices?.[0]?.message?.content) {
-        insight = aiData.choices[0].message.content;
-        modelUsed = model;
-        console.log(`✅ Success with ${model}`);
-        break;
-      } else {
-        console.warn(`⚠️ Model ${model} returned no content, trying next...`);
+        if (aiData?.choices?.[0]?.message?.content) {
+          insight = aiData.choices[0].message.content.trim();
+          modelUsed = model;
+          console.log(`✅ Success with ${model}`);
+          break;
+        }
+
+        if (aiData?.error?.message?.includes("cookie")) {
+          console.warn(`⚠️ ${model} requires cookie auth — skipping`);
+        } else {
+          console.warn(`⚠️ ${model} returned no content or failed — trying next`);
+        }
+      } catch (innerErr) {
+        console.error(`❌ Model ${model} failed:`, innerErr);
       }
     }
 
+    // --- Step 3: Fallback if none worked ---
     if (!insight) {
-      insight = "No AI insight generated — all free models unavailable.";
+      insight = "No AI insight generated — all models unavailable or returned empty.";
       modelUsed = "none";
     }
 
-    // Cache result
-    setCache(symbol, insight);
-    aiCache.get(symbol).model = modelUsed;
+    // --- Step 4: Cache result ---
+    setCache(symbol, insight, modelUsed);
 
     res.json({
       symbol,
