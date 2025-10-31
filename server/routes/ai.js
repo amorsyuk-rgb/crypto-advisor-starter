@@ -11,11 +11,7 @@ const MAX_CACHE_ITEMS = 20;
 
 // --- Verified API-accessible free models ---
 const FREE_MODELS = [
-  "deepseek/deepseek-chat-v3.1:free",             // 🧠 Excellent reasoning & analysis
-  "meta-llama/llama-3.3-8b-instruct:free",        // ⚙️ Stable, general-purpose
-  "deepseek/deepseek-r1-distill-llama-70b:free",  // 🔍 Reasoning-heavy fallback
-  "google/gemini-2.0-flash-exp:free",             // ⚡ Fast & reliable summarizer
-  "qwen/qwen-2.5-72b-instruct:free"               // 💬 Strong contextual reasoning
+  "nvidia/nemotron-nano-12b-v2-vl:free"
 ];
 
 // --- Cache helper ---
