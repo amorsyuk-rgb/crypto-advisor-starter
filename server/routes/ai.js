@@ -17,28 +17,32 @@ function setCache(symbol, insight) {
   aiCache.set(symbol, { insight, timestamp: Date.now() });
 }
 
-// --- Main Route ---
+// --- Model priority list (all free) ---
+const FREE_MODELS = [
+  "deepseek/deepseek-chat-v3.1:free",   // main DeepSeek model
+  "nousresearch/hermes-2-pro",          // reliable fallback
+  "gryphe/mythomax-l2-13b"              // creative reasoning fallback
+];
+
+// --- Route definition ---
 router.get("/:symbol/ai", async (req, res) => {
   const { symbol } = req.params;
   const force = req.query.force === "true";
   const now = Date.now();
 
-  // Default to DeepSeek free model
-  let model = req.query.model || "deepseek/deepseek-chat-v3.1:free";
-
-  // Serve from cache
+  // Serve from cache if valid
   const cached = aiCache.get(symbol);
   if (cached && !force && now - cached.timestamp < CACHE_TTL) {
     return res.json({
       symbol,
-      model,
+      model: cached.model,
       ai_summary: cached.insight,
-      cached: true,
+      cached: true
     });
   }
 
   try {
-    // --- Fetch base analysis ---
+    // --- Step 1: fetch base market data ---
     const baseUrl = `https://${req.get("host")}`;
     const analysisUrl = `${baseUrl}/api/assets/${symbol}/analysis`;
     const analysisRes = await fetch(analysisUrl);
@@ -58,12 +62,21 @@ router.get("/:symbol/ai", async (req, res) => {
 You are a professional crypto analyst. Given this data:
 ${JSON.stringify(compact, null, 2)}
 Summarize ${symbol}'s current market condition in 3–5 sentences.
-Include short-term trend, momentum, and risk level in plain English.
+Include short-term trend, momentum, and risk level in clear trader language.
 `;
 
-    // --- Function to query OpenRouter ---
+    // --- Helper to call OpenRouter ---
     async function queryModel(modelId, reasoning = false) {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const body = {
+        model: modelId,
+        messages: [
+          { role: "system", content: "You are a professional crypto market analyst." },
+          { role: "user", content: prompt }
+        ]
+      };
+      if (reasoning) body.reasoning = { effort: "medium" };
+
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -71,33 +84,46 @@ Include short-term trend, momentum, and risk level in plain English.
           "HTTP-Referer": "https://crypto-advisor-starter.onrender.com",
           "X-Title": "Crypto Advisor Starter"
         },
-        body: JSON.stringify({
-          model: modelId,
-          reasoning: reasoning,
-          messages: [
-            { role: "system", content: "You are a professional crypto market analyst." },
-            { role: "user", content: prompt }
-          ]
-        })
+        body: JSON.stringify(body)
       });
-      return res.json();
+      return response.json();
     }
 
-    // --- Step 1: Try DeepSeek with reasoning ---
-    let aiData = await queryModel(model, true);
-    let insight = aiData.choices?.[0]?.message?.content;
+    // --- Step 2: Try models in order until one succeeds ---
+    let insight = null;
+    let modelUsed = null;
 
-    // --- Step 2: Fallback to GPT-4o-mini if DeepSeek fails ---
+    for (const model of FREE_MODELS) {
+      console.log(`🔍 Trying model: ${model}`);
+      const useReasoning = model.startsWith("deepseek/");
+      const aiData = await queryModel(model, useReasoning);
+      console.log("AI raw response:", JSON.stringify(aiData, null, 2));
+
+      if (aiData.choices?.[0]?.message?.content) {
+        insight = aiData.choices[0].message.content;
+        modelUsed = model;
+        console.log(`✅ Success with ${model}`);
+        break;
+      } else {
+        console.warn(`⚠️ Model ${model} returned no content, trying next...`);
+      }
+    }
+
     if (!insight) {
-      console.warn("⚠️ DeepSeek returned empty response, switching to GPT-4o-mini...");
-      model = "openrouter/openai/gpt-4o-mini";
-      aiData = await queryModel(model, false);
-      insight = aiData.choices?.[0]?.message?.content || "No AI insight generated from any model.";
+      insight = "No AI insight generated — all free models unavailable.";
+      modelUsed = "none";
     }
 
-    // Cache and respond
+    // Cache result
     setCache(symbol, insight);
-    res.json({ symbol, model, ai_summary: insight, cached: false });
+    aiCache.get(symbol).model = modelUsed;
+
+    res.json({
+      symbol,
+      model: modelUsed,
+      ai_summary: insight,
+      cached: false
+    });
 
   } catch (err) {
     console.error("AI route error:", err);
