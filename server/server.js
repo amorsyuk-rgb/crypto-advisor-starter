@@ -4,8 +4,10 @@ import analysisRoutes from "./routes/analysis.js";
 import assetsRoutes from "./routes/assets.js";
 import aiRoutes from "./routes/ai.js";
 import modelsRoutes from "./routes/models.js";   // ✅ NEW
-
+import aiTestRoutes from "./routes/ai-test.js";
 const app = express();
+app.use("/api/ai", aiTestRoutes);
+
 app.use(cors());
 app.use(express.json());
 
