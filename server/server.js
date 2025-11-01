@@ -6,13 +6,14 @@ import aiRoutes from "./routes/ai.js";
 import modelsRoutes from "./routes/models.js";   // ✅ NEW
 import aiTestRoutes from "./routes/ai-test.js";
 import aiStatusRoutes from "./routes/ai-status.js";
+import aiMonitorRoutes from "./routes/ai-monitor.js";
 
 const app = express();
 app.use("/api/ai", aiTestRoutes);
 app.use("/api/ai", aiStatusRoutes);
 app.use(cors());
 app.use(express.json());
-
+app.use("/api/ai", aiMonitorRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/assets", assetsRoutes);
 app.use("/api", aiRoutes);
