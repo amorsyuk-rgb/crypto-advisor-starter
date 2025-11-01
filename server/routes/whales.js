@@ -4,10 +4,10 @@ import fetch from "node-fetch";
 const router = express.Router();
 
 /**
- * Whale Tracker – Live sources
- *  • BTC → Blockchain.com (unconfirmed)
- *  • ETH → Ethplorer top transactions (real-time)
- *  • USDT → Ethplorer token transfers (ERC20)
+ * Whale Tracker – Updated Real-Time Feeds
+ * - BTC → Blockchain.com (live unconfirmed)
+ * - ETH → Ethplorer (real ETH transactions)
+ * - USDT → Ethplorer (ERC20 token transfers)
  */
 
 router.get("/:symbol", async (req, res) => {
@@ -18,7 +18,7 @@ router.get("/:symbol", async (req, res) => {
 
   try {
     switch (symbol) {
-      // 🟠 BITCOIN
+      // 🟠 BITCOIN (realtime)
       case "BTC":
         url = "https://blockchain.info/unconfirmed-transactions?format=json";
         parser = async (json) => {
@@ -39,22 +39,28 @@ router.get("/:symbol", async (req, res) => {
         };
         break;
 
-      // 🟣 ETHEREUM
+      // 🟣 ETHEREUM (real transactions via Ethplorer)
       case "ETH":
-        url = "https://api.ethplorer.io/getTop?apiKey=freekey";
+        // using the Ethplorer feed of recent Ethereum transactions
+        // note: this includes token and ETH transfers; we’ll filter to pure ETH
+        url = "https://api.ethplorer.io/getTopTransactions?apiKey=freekey";
         parser = async (json) => {
-          const txs = json.holders || json.tokens || [];
-          return (json.tokens || [])
+          const txs = json.transactions || [];
+          return txs
+            .filter((tx) => tx.value && Number(tx.value) / 1e18 >= min)
             .map((tx) => ({
-              name: tx.tokenInfo?.name || "Token",
-              symbol: tx.tokenInfo?.symbol || "ETH",
-              price: tx.price?.rate,
+              hash: tx.hash,
+              from: tx.from,
+              to: tx.to,
+              amount: (Number(tx.value) / 1e18).toFixed(3),
+              formatted: `${(Number(tx.value) / 1e18).toFixed(3)} ETH`,
+              time: new Date(tx.timestamp * 1000).toLocaleTimeString(),
             }))
-            .slice(0, 10);
+            .slice(0, 15);
         };
         break;
 
-      // 🟢 USDT (ERC-20)
+      // 🟢 USDT (ERC-20 transfers via Ethplorer)
       case "USDT":
         url =
           "https://api.ethplorer.io/getTokenHistory/0xdac17f958d2ee523a2206206994597c13d831ec7?apiKey=freekey&type=transfer";
@@ -77,8 +83,7 @@ router.get("/:symbol", async (req, res) => {
       default:
         return res.status(400).json({
           success: false,
-          error:
-            "Unsupported symbol. Try BTC, ETH, or USDT (case-insensitive).",
+          error: "Unsupported symbol. Use BTC, ETH, or USDT.",
         });
     }
 
