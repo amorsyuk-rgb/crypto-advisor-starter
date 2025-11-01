@@ -4,57 +4,89 @@ import fetch from "node-fetch";
 const router = express.Router();
 
 /**
- * Whale Tracker (Free, Reliable)
- * Uses Blockchain.com public API to show recent large Bitcoin transactions.
+ * Multi-coin Whale Tracker (BTC / ETH / USDT)
+ * Automatically uses open APIs — no API key required.
  */
-router.get("/", async (req, res) => {
-  try {
-    const response = await fetch("https://blockchain.info/unconfirmed-transactions?format=json");
+router.get("/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  let url = "";
+  let parser = null;
 
-    if (!response.ok) {
-      throw new Error(`Blockchain.com API responded with status ${response.status}`);
+  try {
+    switch (symbol) {
+      case "BTC":
+        url = "https://blockchain.info/unconfirmed-transactions?format=json";
+        parser = async (json) => {
+          const txs = json.txs || [];
+          return txs
+            .map((tx) => {
+              const totalBTC =
+                tx.out.reduce((a, o) => a + o.value, 0) / 100000000;
+              return {
+                hash: tx.hash,
+                amount: `${totalBTC.toFixed(2)} BTC`,
+                time: new Date(tx.time * 1000).toLocaleTimeString(),
+              };
+            })
+            .filter((tx) => parseFloat(tx.amount) >= 50) // default threshold: 50 BTC
+            .slice(0, 10);
+        };
+        break;
+
+      case "ETH":
+        url = "https://api.etherscan.io/api?module=account&action=txlist&address=0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae&startblock=0&endblock=99999999&sort=desc";
+        parser = async (json) => {
+          const txs = json.result || [];
+          return txs.slice(0, 10).map((tx) => ({
+            hash: tx.hash,
+            amount: `${(tx.value / 1e18).toFixed(2)} ETH`,
+            from: tx.from,
+            to: tx.to,
+            time: new Date(tx.timeStamp * 1000).toLocaleTimeString(),
+          }));
+        };
+        break;
+
+      case "USDT":
+        url = "https://api.trongrid.io/v1/accounts/TLsvX46rK9wUq3dYLGJjYohZ9Uj6ahFgDY/transactions/trc20?limit=10";
+        parser = async (json) => {
+          const txs = json.data || [];
+          return txs.slice(0, 10).map((tx) => ({
+            hash: tx.transaction_id,
+            amount: `${tx.value / 1e6} USDT`,
+            from: tx.from,
+            to: tx.to,
+            time: new Date(tx.block_timestamp).toLocaleTimeString(),
+          }));
+        };
+        break;
+
+      default:
+        return res.status(400).json({
+          success: false,
+          error: "Unsupported symbol. Use BTC, ETH, or USDT.",
+        });
     }
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`API failed: ${response.status}`);
 
     const data = await response.json();
-    const transactions = data.txs || [];
-
-    if (transactions.length === 0) {
-      return res.json({
-        success: true,
-        whales: [],
-        message: "No unconfirmed transactions found (empty feed).",
-      });
-    }
-
-    // Extract only large whale-like transfers (>= 500 BTC)
-    const whales = transactions
-      .map((tx) => {
-        const totalBTC = tx.out
-          .map((o) => o.value)
-          .reduce((a, b) => a + b, 0) / 100000000; // convert satoshi → BTC
-
-        return {
-          hash: tx.hash,
-          totalBTC: totalBTC.toFixed(2),
-          time: new Date(tx.time * 1000).toLocaleTimeString(),
-          size: tx.size,
-        };
-      })
-      .filter((tx) => tx.totalBTC >= 500) // large transfer threshold
-      .slice(0, 10);
+    const whales = await parser(data);
 
     res.json({
       success: true,
-      source: "Blockchain.com (Public Feed)",
+      symbol,
       count: whales.length,
       whales,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.error("🐋 Whale API Error:", err.message);
+    console.error(`🐋 ${symbol} Whale API Error:`, err.message);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch whale data (Blockchain.com).",
+      symbol,
+      error: `Failed to fetch whale data for ${symbol}`,
     });
   }
 });
