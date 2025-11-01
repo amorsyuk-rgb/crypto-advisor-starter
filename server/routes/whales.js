@@ -4,21 +4,21 @@ import fetch from "node-fetch";
 const router = express.Router();
 
 /**
- * Universal Whale Tracker (BTC, ETH, USDT)
- * - BTC uses Blockchain.com live mempool feed
- * - ETH uses Etherscan community mirror (free public JSON)
- * - USDT uses Tronscan open data endpoint
+ * Whale Tracker – Live sources
+ *  • BTC → Blockchain.com (unconfirmed)
+ *  • ETH → Ethplorer top transactions (real-time)
+ *  • USDT → Ethplorer token transfers (ERC20)
  */
 
 router.get("/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
-  const minBTC = parseFloat(req.query.min_btc) || 50;
+  const min = parseFloat(req.query.min_btc) || 5; // threshold
   let url = "";
   let parser = null;
 
   try {
     switch (symbol) {
-      // 🟠 BITCOIN (public)
+      // 🟠 BITCOIN
       case "BTC":
         url = "https://blockchain.info/unconfirmed-transactions?format=json";
         parser = async (json) => {
@@ -26,7 +26,7 @@ router.get("/:symbol", async (req, res) => {
           return txs
             .map((tx) => {
               const totalBTC =
-                tx.out.reduce((a, o) => a + o.value, 0) / 100000000;
+                tx.out.reduce((a, o) => a + o.value, 0) / 1e8;
               return {
                 hash: tx.hash,
                 amount: totalBTC,
@@ -34,41 +34,43 @@ router.get("/:symbol", async (req, res) => {
                 time: new Date(tx.time * 1000).toLocaleTimeString(),
               };
             })
-            .filter((tx) => tx.amount >= minBTC)
+            .filter((tx) => tx.amount >= min)
+            .slice(0, 15);
+        };
+        break;
+
+      // 🟣 ETHEREUM
+      case "ETH":
+        url = "https://api.ethplorer.io/getTop?apiKey=freekey";
+        parser = async (json) => {
+          const txs = json.holders || json.tokens || [];
+          return (json.tokens || [])
+            .map((tx) => ({
+              name: tx.tokenInfo?.name || "Token",
+              symbol: tx.tokenInfo?.symbol || "ETH",
+              price: tx.price?.rate,
+            }))
             .slice(0, 10);
         };
         break;
 
-      // 🟣 ETHEREUM (alternate open-source feed)
-      case "ETH":
-        url = "https://api.blockchair.com/ethereum/transactions?q=value(10000000000000000000..)&limit=10";
-        parser = async (json) => {
-          const txs = json.data || [];
-          return txs.map((tx) => ({
-            hash: tx.transaction_hash,
-            amount: (tx.value / 1e18).toFixed(2),
-            formatted: `${(tx.value / 1e18).toFixed(2)} ETH`,
-            time: new Date(tx.time).toLocaleTimeString(),
-          }));
-        };
-        break;
-
-      // 🟢 USDT (public Tronscan)
+      // 🟢 USDT (ERC-20)
       case "USDT":
-        url = "https://apilist.tronscanapi.com/api/token_trc20/transfers?limit=20&start=0&sort=-timestamp&count=true&token=TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+        url =
+          "https://api.ethplorer.io/getTokenHistory/0xdac17f958d2ee523a2206206994597c13d831ec7?apiKey=freekey&type=transfer";
         parser = async (json) => {
-          const txs = json.data || [];
+          const txs = json.operations || [];
           return txs
             .map((tx) => ({
-              hash: tx.transaction_id,
-              amount: tx.quant / 1e6,
-              formatted: `${(tx.quant / 1e6).toLocaleString()} USDT`,
-              from: tx.transfer_from_address,
-              to: tx.transfer_to_address,
-              time: new Date(tx.block_ts).toLocaleTimeString(),
+              hash: tx.transactionHash,
+              amount: (tx.value / 1e6).toFixed(2),
+              formatted: `${(tx.value / 1e6).toLocaleString()} USDT`,
+              from: tx.from,
+              to: tx.to,
+              time: new Date(tx.timestamp * 1000).toLocaleTimeString(),
             }))
-            .filter((tx) => tx.amount >= minBTC * 1000)
-            .slice(0, 10);
+            .filter((tx) => tx.amount >= min * 1000)
+            .slice(0, 15);
         };
         break;
 
@@ -76,13 +78,13 @@ router.get("/:symbol", async (req, res) => {
         return res.status(400).json({
           success: false,
           error:
-            "Unsupported symbol. Use BTC, ETH, or USDT (case-insensitive).",
+            "Unsupported symbol. Try BTC, ETH, or USDT (case-insensitive).",
         });
     }
 
     const response = await fetch(url);
     if (!response.ok)
-      throw new Error(`API fetch failed: ${response.status}`);
+      throw new Error(`Fetch failed: ${response.status}`);
 
     const json = await response.json();
     const whales = await parser(json);
@@ -90,7 +92,6 @@ router.get("/:symbol", async (req, res) => {
     res.json({
       success: true,
       symbol,
-      threshold: `${minBTC}`,
       count: whales.length,
       whales,
       updatedAt: new Date().toISOString(),
