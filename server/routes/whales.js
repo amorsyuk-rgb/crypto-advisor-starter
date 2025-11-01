@@ -4,31 +4,32 @@ import fetch from "node-fetch";
 const router = express.Router();
 
 /**
- * Whale Tracker — v3
- * ------------------
- * Features:
- * ✅ Real-time data
- * ✅ 2-minute caching
- * ✅ Adaptive threshold (never empty)
- * ✅ Works with Blockchain.com, Blockchair, and Ethplorer
+ * Whale Tracker v4
+ * ----------------
+ * ✅ Real-time tracking (BTC, ETH, USDT)
+ * ✅ 2-min cache
+ * ✅ Adaptive threshold fallback
+ * ✅ /status route for monitoring
  */
 
-// Cache structure
+// Cache store
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
-// Helper: Check cache validity
+// Cache helpers
 function getCache(symbol) {
   const entry = cache.get(symbol);
   if (entry && Date.now() - entry.timestamp < CACHE_TTL) return entry.data;
   return null;
 }
 
-// Helper: Set cache
 function setCache(symbol, data) {
   cache.set(symbol, { data, timestamp: Date.now() });
 }
 
+// -----------------------------
+// 🐋 Whale Data Endpoint
+// -----------------------------
 router.get("/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const userMin = parseFloat(req.query.min_btc) || 5;
@@ -36,7 +37,7 @@ router.get("/:symbol", async (req, res) => {
   let whales = [];
   let source = "unknown";
 
-  // Serve cached data if valid
+  // Serve cached version if valid
   const cached = getCache(symbol);
   if (cached) {
     return res.json({
@@ -51,7 +52,6 @@ router.get("/:symbol", async (req, res) => {
   }
 
   try {
-    // Internal helper to fetch + parse
     async function fetchWhales(symbol, min) {
       let url, parser;
 
@@ -63,8 +63,7 @@ router.get("/:symbol", async (req, res) => {
             const txs = json.txs || [];
             return txs
               .map((tx) => {
-                const totalBTC =
-                  tx.out.reduce((a, o) => a + o.value, 0) / 1e8;
+                const totalBTC = tx.out.reduce((a, o) => a + o.value, 0) / 1e8;
                 return {
                   hash: tx.hash,
                   amount: totalBTC,
@@ -75,12 +74,12 @@ router.get("/:symbol", async (req, res) => {
               .filter((tx) => tx.amount >= min)
               .slice(0, 15);
           };
-          source = "Blockchain";
+          source = "Blockchain.com";
           break;
 
-        // 🟣 ETH (Hybrid)
+        // 🟣 ETH
         case "ETH":
-          url = "https://api.blockchair.com/ethereum/transactions?q=value(100000000000000000..)&limit=15"; // >=0.1 ETH
+          url = "https://api.blockchair.com/ethereum/transactions?q=value(100000000000000000..)&limit=15";
           parser = async (json) => {
             const txs = json.data || [];
             return txs
@@ -98,8 +97,7 @@ router.get("/:symbol", async (req, res) => {
 
         // 🟢 USDT
         case "USDT":
-          url =
-            "https://api.ethplorer.io/getTokenHistory/0xdac17f958d2ee523a2206206994597c13d831ec7?apiKey=freekey&type=transfer";
+          url = "https://api.ethplorer.io/getTokenHistory/0xdac17f958d2ee523a2206206994597c13d831ec7?apiKey=freekey&type=transfer";
           parser = async (json) => {
             const txs = json.operations || [];
             return txs
@@ -121,23 +119,22 @@ router.get("/:symbol", async (req, res) => {
           throw new Error("Unsupported symbol");
       }
 
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-      const json = await response.json();
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+      const json = await res.json();
       return await parser(json);
     }
 
-    // Adaptive loop: lower threshold until we get data
+    // Adaptive fetch loop
     let attempts = 0;
     while (whales.length === 0 && attempts < 4) {
       whales = await fetchWhales(symbol, min);
       if (whales.length === 0) {
-        min = min / 2; // gradually lower
+        min = min / 2; // auto-lower threshold
         attempts++;
       }
     }
 
-    // Build response
     const data = {
       success: true,
       symbol,
@@ -147,17 +144,47 @@ router.get("/:symbol", async (req, res) => {
       updatedAt: new Date().toISOString(),
     };
 
-    // Cache it
     setCache(symbol, data);
-
     res.json(data);
   } catch (err) {
-    console.error(`🐋 Whale API Error (${symbol}):`, err.message);
+    console.error(`🐋 Whale API error (${symbol}):`, err.message);
     res.status(500).json({
       success: false,
       symbol,
       error: `Failed to fetch whale data for ${symbol}`,
     });
+  }
+});
+
+// -----------------------------
+// 📊 Status Monitor Endpoint
+// -----------------------------
+router.get("/status/check", async (req, res) => {
+  try {
+    const status = {};
+    const now = Date.now();
+
+    for (const [symbol, entry] of cache.entries()) {
+      const ageSec = Math.round((now - entry.timestamp) / 1000);
+      status[symbol] = {
+        age_seconds: ageSec,
+        fresh: ageSec < CACHE_TTL / 1000,
+        last_updated: entry.data.updatedAt,
+        count: entry.data.whales.length,
+        source: entry.data.source,
+      };
+    }
+
+    res.json({
+      success: true,
+      checkedAt: new Date().toISOString(),
+      cache_ttl_minutes: CACHE_TTL / 60000,
+      cached_symbols: Array.from(cache.keys()),
+      status,
+    });
+  } catch (err) {
+    console.error("Status check error:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
