@@ -4,20 +4,21 @@ import fetch from "node-fetch";
 const router = express.Router();
 
 /**
- * Universal Whale Tracker
- * Allows: /api/whales/:symbol?min_btc=50
- * Works for BTC, ETH, and USDT (with dynamic thresholds)
+ * Universal Whale Tracker (BTC, ETH, USDT)
+ * - BTC uses Blockchain.com live mempool feed
+ * - ETH uses Etherscan community mirror (free public JSON)
+ * - USDT uses Tronscan open data endpoint
  */
+
 router.get("/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
-  const minBTC = parseFloat(req.query.min_btc) || 50; // default threshold
-
+  const minBTC = parseFloat(req.query.min_btc) || 50;
   let url = "";
   let parser = null;
 
   try {
     switch (symbol) {
-      // 🟠 BITCOIN
+      // 🟠 BITCOIN (public)
       case "BTC":
         url = "https://blockchain.info/unconfirmed-transactions?format=json";
         parser = async (json) => {
@@ -38,58 +39,50 @@ router.get("/:symbol", async (req, res) => {
         };
         break;
 
-      // 🟣 ETHEREUM
+      // 🟣 ETHEREUM (alternate open-source feed)
       case "ETH":
-        url =
-          "https://api.etherscan.io/api?module=account&action=txlist&address=0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae&sort=desc";
+        url = "https://api.blockchair.com/ethereum/transactions?q=value(10000000000000000000..)&limit=10";
         parser = async (json) => {
-          const txs = json.result || [];
-          return txs
-            .map((tx) => ({
-              hash: tx.hash,
-              amount: tx.value / 1e18,
-              formatted: `${(tx.value / 1e18).toFixed(2)} ETH`,
-              from: tx.from,
-              to: tx.to,
-              time: new Date(tx.timeStamp * 1000).toLocaleTimeString(),
-            }))
-            .filter((tx) => tx.amount >= minBTC / 20) // roughly scale vs BTC
-            .slice(0, 10);
+          const txs = json.data || [];
+          return txs.map((tx) => ({
+            hash: tx.transaction_hash,
+            amount: (tx.value / 1e18).toFixed(2),
+            formatted: `${(tx.value / 1e18).toFixed(2)} ETH`,
+            time: new Date(tx.time).toLocaleTimeString(),
+          }));
         };
         break;
 
-      // 🟢 USDT (TRON)
+      // 🟢 USDT (public Tronscan)
       case "USDT":
-        url =
-          "https://api.trongrid.io/v1/accounts/TLsvX46rK9wUq3dYLGJjYohZ9Uj6ahFgDY/transactions/trc20?limit=50";
+        url = "https://apilist.tronscanapi.com/api/token_trc20/transfers?limit=20&start=0&sort=-timestamp&count=true&token=TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
         parser = async (json) => {
           const txs = json.data || [];
           return txs
             .map((tx) => ({
               hash: tx.transaction_id,
-              amount: tx.value / 1e6,
-              formatted: `${(tx.value / 1e6).toLocaleString()} USDT`,
-              from: tx.from,
-              to: tx.to,
-              time: new Date(tx.block_timestamp).toLocaleTimeString(),
+              amount: tx.quant / 1e6,
+              formatted: `${(tx.quant / 1e6).toLocaleString()} USDT`,
+              from: tx.transfer_from_address,
+              to: tx.transfer_to_address,
+              time: new Date(tx.block_ts).toLocaleTimeString(),
             }))
-            .filter((tx) => tx.amount >= minBTC * 1000) // scale since USDT smaller
+            .filter((tx) => tx.amount >= minBTC * 1000)
             .slice(0, 10);
         };
         break;
 
-      // 🔴 Default
       default:
         return res.status(400).json({
           success: false,
           error:
-            "Unsupported symbol. Try BTC, ETH, or USDT (case-insensitive).",
+            "Unsupported symbol. Use BTC, ETH, or USDT (case-insensitive).",
         });
     }
 
     const response = await fetch(url);
     if (!response.ok)
-      throw new Error(`API failed with status ${response.status}`);
+      throw new Error(`API fetch failed: ${response.status}`);
 
     const json = await response.json();
     const whales = await parser(json);
