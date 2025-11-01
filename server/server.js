@@ -7,8 +7,10 @@ import modelsRoutes from "./routes/models.js";   // ✅ NEW
 import aiTestRoutes from "./routes/ai-test.js";
 import aiStatusRoutes from "./routes/ai-status.js";
 import aiMonitorRoutes from "./routes/ai-monitor.js";
+import whaleRouter from "./routes/whales.js";
 
 const app = express();
+app.use("/api/whales", whaleRouter);
 app.use("/api/ai", aiTestRoutes);
 app.use("/api/ai", aiStatusRoutes);
 app.use(cors());
