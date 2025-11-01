@@ -103,6 +103,7 @@ Include trend, momentum, and risk level.
     setCache(symbol, insight);
 
     // ✅ Update monitor status
+    console.log("✅ Updating AI monitor: ", modelUsed);
     updateAIStatus({
       successModel: modelUsed,
       cacheInfo: { lastUpdated: new Date().toISOString(), cachedCount: aiCache.size }
