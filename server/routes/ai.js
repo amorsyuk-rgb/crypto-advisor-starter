@@ -1,52 +1,36 @@
-// server/routes/ai.js
 import express from "express";
 import fetch from "node-fetch";
+import { updateAIStatus } from "./ai-status.js";
 
 const router = express.Router();
 
-// --- In-memory AI Cache ---
+// Cache system
 const aiCache = new Map();
-const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+const CACHE_TTL = 15 * 60 * 1000; // 15 min
 const MAX_CACHE_ITEMS = 20;
 
-// --- Confirmed working models (from your test) ---
-const FREE_MODELS = [
-  "deepseek/deepseek-chat-v3.1:free",
-  "deepseek/deepseek-r1-distill-llama-70b:free",
-  "meta-llama/llama-3.3-8b-instruct:free",
-  "google/gemini-2.0-flash-exp:free"
-];
-
-// --- Cache helper ---
-function setCache(symbol, insight, model) {
+// Helper to manage cache
+function setCache(symbol, insight) {
   if (aiCache.size >= MAX_CACHE_ITEMS) {
-    aiCache.delete(aiCache.keys().next().value);
+    const oldest = aiCache.keys().next().value;
+    aiCache.delete(oldest);
   }
-  aiCache.set(symbol, { insight, model, timestamp: Date.now() });
+  aiCache.set(symbol, { insight, timestamp: Date.now() });
 }
 
-// --- Route ---
 router.get("/:symbol/ai", async (req, res) => {
   const { symbol } = req.params;
   const force = req.query.force === "true";
-  const userModel = req.query.model;
   const now = Date.now();
 
-  // Check cache
   const cached = aiCache.get(symbol);
   if (cached && !force && now - cached.timestamp < CACHE_TTL) {
-    return res.json({
-      symbol,
-      model: cached.model,
-      ai_summary: cached.insight,
-      cached: true
-    });
+    return res.json({ symbol, ai_summary: cached.insight, cached: true });
   }
 
   try {
-    // Fetch base market data
-    const baseUrl = `https://${req.get("host")}`;
-    const analysisUrl = `${baseUrl}/api/assets/${symbol}/analysis`;
+    // Get analysis data
+    const analysisUrl = `${req.protocol}://${req.get("host")}/api/assets/${symbol}/analysis`;
     const analysisRes = await fetch(analysisUrl);
     const analysis = await analysisRes.json();
 
@@ -61,74 +45,70 @@ router.get("/:symbol/ai", async (req, res) => {
     };
 
     const prompt = `
-You are a professional crypto analyst.
-Given this data:
+You are a senior crypto analyst. Given this data:
 ${JSON.stringify(compact, null, 2)}
 Summarize ${symbol}'s current market condition in 3–5 sentences.
-Include short-term trend, momentum, and risk level.
-Write clearly, with concise trading insights.
+Include trend, momentum, and risk level.
 `;
 
-    async function queryModel(modelId) {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "HTTP-Referer": "https://crypto-advisor-starter.onrender.com",
-          "X-Title": "Crypto Advisor Starter"
-        },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [
-            { role: "system", content: "You are a senior crypto analyst providing factual insights." },
-            { role: "user", content: prompt }
-          ]
-        })
-      });
-      return response.json();
-    }
+    // Try free models in order
+    const models = [
+      "deepseek/deepseek-chat-v3.1:free",
+      "meta-llama/llama-3.3-8b-instruct:free",
+      "google/gemini-2.0-flash-exp:free"
+    ];
 
-    const modelsToTry = userModel ? [userModel] : FREE_MODELS;
-    let insight = null;
+    let insight = "";
     let modelUsed = null;
 
-    for (const model of modelsToTry) {
-      console.log(`🔍 Trying model: ${model}`);
+    for (const model of models) {
       try {
-        const aiData = await queryModel(model);
+        const aiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`
+          },
+          body: JSON.stringify({
+            model,
+            reasoning: { enabled: true },
+            messages: [
+              { role: "system", content: "You are a professional crypto analyst." },
+              { role: "user", content: prompt }
+            ]
+          })
+        });
+
+        const aiData = await aiRes.json();
         console.log(`AI raw response from ${model}:`, JSON.stringify(aiData, null, 2));
 
-        if (aiData?.choices?.[0]?.message?.content) {
-          insight = aiData.choices[0].message.content.trim();
+        insight = aiData?.choices?.[0]?.message?.content?.trim();
+        if (insight) {
           modelUsed = model;
-          console.log(`✅ Success with ${model}`);
           break;
-        }
-
-        if (aiData?.error?.message?.includes("Rate limit")) {
-          console.warn(`⚠️ Rate limit on ${model} — retrying next model`);
         } else {
-          console.warn(`⚠️ ${model} returned no usable response — skipping`);
+          console.warn(`⚠️ ${model} returned empty response, trying next...`);
         }
-      } catch (innerErr) {
-        console.error(`❌ ${model} failed:`, innerErr);
+      } catch (err) {
+        console.warn(`⚠️ Error from ${model}:`, err.message);
       }
     }
 
+    // Fallback text if all models fail
     if (!insight) {
-      insight = "No AI insight generated — all models unavailable or rate limited.";
+      insight = `${symbol} is currently trading at $${analysis.price}. Unable to generate deeper AI analysis at this time.`;
       modelUsed = "none";
     }
 
-    setCache(symbol, insight, modelUsed);
+    setCache(symbol, insight);
 
-    res.json({
-      symbol,
-      model: modelUsed,
-      ai_summary: insight,
-      cached: false
+    // ✅ Update monitor status
+    updateAIStatus({
+      successModel: modelUsed,
+      cacheInfo: { lastUpdated: new Date().toISOString(), cachedCount: aiCache.size }
     });
+
+    res.json({ symbol, model: modelUsed, ai_summary: insight, cached: false });
 
   } catch (err) {
     console.error("AI route error:", err);
