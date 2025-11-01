@@ -3,34 +3,51 @@ import fetch from "node-fetch";
 
 const router = express.Router();
 
+/**
+ * Whale Tracker Route (Free Version)
+ * Uses BitInfoCharts to fetch the richest Bitcoin wallets
+ * and simulate whale activity (no API key required)
+ */
 router.get("/", async (req, res) => {
   try {
-    const apiUrl = "https://api.whale-alert.io/v1/transactions?api_key=demo&min_value=500000";
-    const response = await fetch(apiUrl);
+    const response = await fetch(
+      "https://bitinfocharts.com/comparison/bitcoin-richlist.json"
+    );
+
+    if (!response.ok) {
+      throw new Error(`API responded with status ${response.status}`);
+    }
+
     const data = await response.json();
 
-    if (!data.transactions) {
-      return res.status(200).json({
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({
         success: true,
         whales: [],
-        message: "No transactions found or rate limited",
+        message: "No whale data available (source returned empty).",
       });
     }
 
-    const whales = data.transactions.map((t) => ({
-      symbol: t.symbol?.toUpperCase() || "N/A",
-      amount: t.amount?.toLocaleString(),
-      to_exchange: t.to?.exchange || "Unknown",
-      to_address: t.to?.owner_type || "Private Wallet",
-      time_ago: new Date(t.timestamp * 1000).toLocaleTimeString(),
+    // Map and format top 10 richest wallets
+    const whales = data.slice(0, 10).map((t, i) => ({
+      rank: i + 1,
+      address: t.address || "Unknown Wallet",
+      balance: `${parseFloat(t.balance).toLocaleString()} BTC`,
+      percentage: `${t.percent?.toFixed?.(2) || t.percent || "N/A"}%`,
     }));
 
-    res.json({ success: true, whales: whales.slice(0, 10) });
+    res.json({
+      success: true,
+      source: "BitInfoCharts",
+      count: whales.length,
+      whales,
+      updatedAt: new Date().toISOString(),
+    });
   } catch (err) {
-    console.error("🐋 Whale API Error:", err);
+    console.error("🐋 Whale Tracker Error:", err.message);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch whale data from Whale Alert API.",
+      error: "Failed to fetch whale data (BitInfoCharts).",
     });
   }
 });
