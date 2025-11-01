@@ -4,7 +4,12 @@ import fetch from "node-fetch";
 
 const router = express.Router();
 
-// Import or redefine your verified free models
+// --- Cached test results to avoid rate limits ---
+let lastTestTime = 0;
+let cachedResults = null;
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour cache
+
+// --- Verified API-usable free models ---
 const FREE_MODELS = [
   "deepseek/deepseek-chat-v3.1:free",
   "deepseek/deepseek-r1-distill-llama-70b:free",
@@ -13,7 +18,10 @@ const FREE_MODELS = [
   "google/gemini-2.0-flash-exp:free"
 ];
 
-// Helper function to test a single model
+// --- Delay helper (to prevent hitting rate limits) ---
+const delay = ms => new Promise(res => setTimeout(res, ms));
+
+// --- Test a single model ---
 async function testModel(modelId, apiKey) {
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -43,6 +51,14 @@ async function testModel(modelId, apiKey) {
       return { status: "❌ Requires cookie (web-only)" };
     }
 
+    if (data?.error?.message?.includes("Rate limit")) {
+      return { status: "⚠️ Rate limited — try again in 60s" };
+    }
+
+    if (data?.error?.message?.includes("allowed providers")) {
+      return { status: "⚠️ No allowed providers — account not authorized yet" };
+    }
+
     if (data?.error?.message) {
       return { status: `⚠️ Error: ${data.error.message}` };
     }
@@ -53,22 +69,40 @@ async function testModel(modelId, apiKey) {
   }
 }
 
-// Route to test all models sequentially
+// --- Route: GET /api/ai/test-models ---
 router.get("/test-models", async (req, res) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return res.status(400).json({ error: "Missing OPENROUTER_API_KEY in environment variables." });
   }
 
+  // Serve from cache if still valid
+  const now = Date.now();
+  if (cachedResults && now - lastTestTime < CACHE_TTL) {
+    return res.json({
+      success: true,
+      cached: true,
+      info: { ageMinutes: Math.round((now - lastTestTime) / 60000), ttlMinutes: CACHE_TTL / 60000 },
+      results: cachedResults
+    });
+  }
+
+  // Run fresh tests sequentially (with delay)
   const results = {};
   for (const model of FREE_MODELS) {
     console.log(`🧪 Testing model: ${model}`);
     results[model] = await testModel(model, apiKey);
+    await delay(2000); // wait 2 seconds before next test
   }
+
+  // Cache results
+  cachedResults = results;
+  lastTestTime = now;
 
   res.json({
     success: true,
     tested: FREE_MODELS.length,
+    cached: false,
     results
   });
 });
