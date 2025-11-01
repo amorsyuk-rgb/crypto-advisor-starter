@@ -10,11 +10,11 @@ import aiMonitorRoutes from "./routes/ai-monitor.js";
 import whaleRouter from "./routes/whales.js";
 
 const app = express();
-app.use("/api/whales", whaleRouter);
 app.use("/api/ai", aiTestRoutes);
 app.use("/api/ai", aiStatusRoutes);
 app.use(cors());
 app.use(express.json());
+app.use("/api/whales", whaleRouter);
 app.use("/api/ai", aiMonitorRoutes);
 app.use("/api/analysis", analysisRoutes);
 app.use("/api/assets", assetsRoutes);
