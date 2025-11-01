@@ -3,47 +3,44 @@ import fetch from "node-fetch";
 
 const router = express.Router();
 
-const BINANCE_BASE = "https://data-api.binance.vision/api/v3";
+const BINANCE_API = "https://data-api.binance.vision/api/v3";
+
+// Utility to calculate simple moving indicators
+function calculateEMA(values, period) {
+  const k = 2 / (period + 1);
+  return values.reduce((acc, price, i) => {
+    if (i === 0) return [price];
+    acc.push(price * k + acc[i - 1] * (1 - k));
+    return acc;
+  }, [])[values.length - 1];
+}
 
 router.get("/assets/:symbol/analysis", async (req, res) => {
   const { symbol } = req.params;
 
   try {
-    // --- 1️⃣ Fetch ticker stats ---
-    const tickerRes = await fetch(`${BINANCE_BASE}/ticker/24hr?symbol=${symbol}`);
+    // Fetch ticker data (24hr stats)
+    const tickerRes = await fetch(`${BINANCE_API}/ticker/24hr?symbol=${symbol}`);
     const ticker = await tickerRes.json();
 
-    if (ticker.code) {
-      throw new Error("Binance mirror rejected request");
+    if (!ticker || ticker.code) {
+      throw new Error("Failed to fetch Binance ticker data");
     }
 
-    // --- 2️⃣ Fetch recent klines for chart ---
-    const klinesRes = await fetch(
-      `${BINANCE_BASE}/klines?symbol=${symbol}&interval=1h&limit=24`
-    );
+    // Fetch 24h hourly klines for chart and EMA calculations
+    const klinesRes = await fetch(`${BINANCE_API}/klines?symbol=${symbol}&interval=1h&limit=24`);
     const klines = await klinesRes.json();
 
-    // Format candles for chart.js
-    const chart = klines.map((candle) => ({
-      time: candle[0],
-      price: parseFloat(candle[4]),
+    const chart = klines.map((k) => ({
+      time: k[0],
+      price: parseFloat(k[4]),
     }));
 
-    // --- 3️⃣ Calculate indicators ---
     const prices = chart.map((c) => c.price);
-    const ema = (arr, n) => {
-      const k = 2 / (n + 1);
-      return arr.reduce((acc, price, i) => {
-        if (i === 0) return [price];
-        acc.push(price * k + acc[i - 1] * (1 - k));
-        return acc;
-      }, []);
-    };
 
-    const ema50 = ema(prices, 50).pop();
-    const ema200 = ema(prices, 200).pop();
-
-    // ATR approximation
+    // Calculate indicators
+    const ema50 = calculateEMA(prices, 50);
+    const ema200 = calculateEMA(prices, 200);
     const atr14 = (() => {
       let sum = 0;
       for (let i = 1; i < Math.min(14, prices.length); i++) {
@@ -51,13 +48,11 @@ router.get("/assets/:symbol/analysis", async (req, res) => {
       }
       return sum / 14;
     })();
+    const vwap = prices.reduce((sum, p) => sum + p, 0) / (prices.length || 1);
 
-    // VWAP (simplified)
-    const vwap =
-      prices.reduce((sum, p) => sum + p, 0) / (prices.length || 1);
-
-    // --- 4️⃣ Assemble unified response ---
-    const analysis = {
+    // Combine everything into a single structured JSON
+    res.json({
+      success: true,
       symbol,
       price: parseFloat(ticker.lastPrice),
       change24h: parseFloat(ticker.priceChangePercent),
@@ -77,9 +72,7 @@ router.get("/assets/:symbol/analysis", async (req, res) => {
         standard: ema50 * 1.03,
       },
       chart,
-    };
-
-    res.json(analysis);
+    });
   } catch (err) {
     console.error("Analysis route error:", err.message);
     res.status(500).json({
