@@ -5,8 +5,8 @@ const router = express.Router();
 
 const BINANCE_API = "https://data-api.binance.vision/api/v3";
 
-// Utility to calculate simple moving indicators
 function calculateEMA(values, period) {
+  if (!values.length) return null;
   const k = 2 / (period + 1);
   return values.reduce((acc, price, i) => {
     if (i === 0) return [price];
@@ -19,15 +19,13 @@ router.get("/assets/:symbol/analysis", async (req, res) => {
   const { symbol } = req.params;
 
   try {
-    // Fetch ticker data (24hr stats)
+    // 1️⃣ Fetch 24hr ticker data
     const tickerRes = await fetch(`${BINANCE_API}/ticker/24hr?symbol=${symbol}`);
     const ticker = await tickerRes.json();
 
-    if (!ticker || ticker.code) {
-      throw new Error("Failed to fetch Binance ticker data");
-    }
+    if (ticker.code) throw new Error(ticker.msg || "Binance data unavailable");
 
-    // Fetch 24h hourly klines for chart and EMA calculations
+    // 2️⃣ Fetch hourly klines for 24h trend
     const klinesRes = await fetch(`${BINANCE_API}/klines?symbol=${symbol}&interval=1h&limit=24`);
     const klines = await klinesRes.json();
 
@@ -37,8 +35,6 @@ router.get("/assets/:symbol/analysis", async (req, res) => {
     }));
 
     const prices = chart.map((c) => c.price);
-
-    // Calculate indicators
     const ema50 = calculateEMA(prices, 50);
     const ema200 = calculateEMA(prices, 200);
     const atr14 = (() => {
@@ -50,7 +46,7 @@ router.get("/assets/:symbol/analysis", async (req, res) => {
     })();
     const vwap = prices.reduce((sum, p) => sum + p, 0) / (prices.length || 1);
 
-    // Combine everything into a single structured JSON
+    // 3️⃣ Construct response
     res.json({
       success: true,
       symbol,
